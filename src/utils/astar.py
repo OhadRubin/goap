@@ -1,8 +1,8 @@
-
 from abc import ABC, abstractmethod
 from collections import deque
 from math import inf
 from src.utils.priority_queue import PriorityQueue
+from sys import float_info
 
 
 class PathNotFoundException(Exception):

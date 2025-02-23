@@ -75,6 +75,16 @@ class RegAction(metaclass=RegActionValidator):
     def get_cost(self, services) -> float:
         return self.cost
 
+    def exec(self):
+        return self.func()
+
+    def func(self):
+        pass
+
+    @property
+    def name(self):
+        return self.__class__.__name__
+
 
 @dataclass(frozen=True)
 class RegPlanStep:
@@ -246,10 +256,12 @@ class RegressivePlanner:
             plan.append(RegPlanStep(node.action, node.services))
         return plan
 
-    def find_plan(self, goal_state: State) -> List[RegPlanStep]:
+    def find_plan(self, goal_state: State, world_state: Optional[State] = None) -> List[RegPlanStep]:
+        if world_state is None:
+            world_state = self._world_state
         # Initially populate the current state with keys from the goal, using
         # current values
-        initial_state = {k: self._world_state[k] for k in goal_state}
+        initial_state = {k: world_state[k] for k in goal_state}
         start = RegressiveGOAPAStarNode(initial_state, goal_state, None)
 
         path = self._search.find_path(start, goal_state)
@@ -284,5 +296,3 @@ def visualise_plan(plan, filename):
     draw_networkx(graph)
     plt.savefig(filename)
     plt.close()
-
-

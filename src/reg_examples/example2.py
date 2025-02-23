@@ -33,6 +33,9 @@ class ChantIncantation(RegAction):
 class CastSpell(RegAction):
     effects = dict(cast_spell=...)
     preconditions = {}
+    
+    def func(self):
+        print("Casting spell")
 
 
 def example_2():
@@ -51,8 +54,9 @@ def example_2():
     planner = RegressivePlanner(world_state, actions)
 
     plan = planner.find_plan(goal_state)
-    for action in plan:
-        print(action)
+    for step in plan:
+        print(step)
+        step.action.exec()
 
 
 """prints:
