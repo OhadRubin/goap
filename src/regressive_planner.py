@@ -14,7 +14,7 @@ from typing import Callable, Optional, List, Dict, Any
 State = Dict[str, Any]
 
 
-from priority_queue import AStarAlgorithm
+from src.utils.astar import AStarAlgorithm
 
 
 class EffectReference:

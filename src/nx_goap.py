@@ -1,5 +1,5 @@
-from nx_utils import *
-from regressive_planner import *
+from src.utils.nx_utils import *
+from src.regressive_planner import RegressivePlanner, RegAction, reference, State
 
 
 class RegActionAdapter(RegAction):
@@ -63,7 +63,6 @@ class RegPlanner:
             )
 
         return converted_plan
-
 
 
 class NXPlanner(object):
