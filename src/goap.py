@@ -1,4 +1,4 @@
-from src.utils.nx_utils import *
+# from src.utils.nx_utils import *
 from src.regressive_planner import RegressivePlanner, RegAction, reference, State
 
 
@@ -295,7 +295,7 @@ class Automaton:
 class AutomatonController(object):
 
     def __init__(
-        self, actions: NXActions, sensors: List[Sensor], name: str, world_state: dict
+        self, actions: List[RegAction], sensors: List[Sensor], name: str, world_state: dict
     ):
         """
         :param actions: List of actions
