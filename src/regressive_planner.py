@@ -76,10 +76,60 @@ class RegAction(metaclass=RegActionValidator):
         return self.cost
 
     def exec(self):
-        return self.func()
-
-    def func(self):
         pass
+
+    @property
+    def name(self):
+        return self.__class__.__name__
+
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class Fact:
+
+    binding: str
+    data: Any
+    parent_sensor: str
+    time_stamp: datetime = field(init=False)
+
+    def __post_init__(self):
+        self.time_stamp = datetime.now()
+
+    def __str__(self):
+        return f"{self.binding}: {self.data}"
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class RegSensorValidator(type):
+    def __new__(mcs, name, bases, namespace):
+        cls = super().__new__(mcs, name, bases, namespace)
+        
+        # Only validate concrete classes (those that inherit from RegSensor)
+        if bases and not cls.binding:
+            raise ValueError(f"Sensor {name} must define a non-empty binding")
+            
+        return cls
+
+
+class RegSensor(metaclass=RegSensorValidator):
+    # preconditions: ClassVar[State] = {}
+    binding: ClassVar[str] = ""
+
+    def exec(self) -> str:
+        """Returns the sensed state as a string"""
+        pass
+
+    def __call__(self) -> str:
+        return Fact(
+            parent_sensor=self.name,
+            data=self.exec(),
+            binding=self.binding,
+        )
 
     @property
     def name(self):

@@ -1,98 +1,17 @@
-# from src.utils.nx_utils import *
-from src.regressive_planner import RegressivePlanner, RegAction, reference, State
+from src.regressive_planner import RegressivePlanner, RegAction, reference, State, RegSensor
 
+from loguru import logger
 
 from typing import Callable, List
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from abc import ABC, abstractmethod
+from time import sleep
+from automat import MethodicalMachine
+from typing import Tuple, Dict
 
-
-class Sensor:
-    """Sensor object factory"""
-
-    def __init__(self, name: str, binding: str, func: Callable):
-        """Sensor object model
-
-        :param binding: string containing the key name
-                        which the sensor will right to
-        :param name: string containing the name of the sensor
-        """
-        self.binding = binding
-        self.name = name
-        self.func = func
-        self.response = {}
-
-    def __str__(self):
-        return self.name
-
-    def __repr__(self):
-        return self.__repr__()
-
-    def __call__(self):
-        return self.exec()
-
-    def exec(self):
-        try:
-            stdout, stderr, return_code = self.func()
-        except RuntimeError as e:
-            raise RuntimeError(f"Error executing function {self.func}. Exception: {e}")
-        self.response = SensorResponse(
-            stdout=stdout, stderr=stderr, return_code=return_code
-        )
-        return self.response
-
-
-class SensorResponse:
-
-    def __init__(
-        self,
-        stdout: str = "",
-        stderr: str = "",
-        return_code: int = 0,
-    ):
-        """
-
-        :param name:
-        :param sensor_type:
-        """
-        self._stdout = stdout
-        self._stderr = stderr
-        self.return_code = return_code
-
-    def __str__(self):
-        response = self.stdout
-        if self.stderr:
-            response = self.stderr
-        return "Response: {}, ReturnCode: {}".format(response, self.return_code)
-
-    def __repr__(self):
-        return self.__str__()
-
-    @property
-    def stdout(self):
-        return self._stdout
-
-    @stdout.setter
-    def stdout(self, value: str):
-        self._stdout = value.rstrip("\r\n")
-
-    @property
-    def stderr(self):
-        return self._stderr
-
-    @stderr.setter
-    def stderr(self, value: str):
-        self._stderr = value.rstrip("\r\n")
-
-    @property
-    def response(self):
-        if self.stdout:
-            return self.stdout
-        else:
-            return self.stderr
-
-    @response.setter
-    def response(self, value):
-        self.response = value
-
+Sensors = List[RegSensor]
 
 class WorldState(dict):
     """
@@ -143,31 +62,6 @@ class WorldState(dict):
         return hash(tuple(sorted(self.items())))
 
 
-from time import sleep
-from datetime import datetime
-from automat import MethodicalMachine
-from dataclasses import dataclass, field
-from typing import Any
-
-
-@dataclass
-class Fact:
-
-    binding: str
-    data: Any
-    parent_sensor: str
-    time_stamp: datetime = field(init=False)
-
-    def __post_init__(self):
-        self.time_stamp = datetime.now()
-
-    def __str__(self):
-        return f"{self.binding}: {self.data}"
-
-    def __repr__(self):
-        return self.__str__()
-
-
 class Automaton:
     """A 3 State Machine Automaton: observing (aka monitor or patrol), planning and acting"""
 
@@ -176,7 +70,7 @@ class Automaton:
     def __init__(
         self,
         name: str,
-        sensors: List[Sensor],
+        sensors: Sensors,
         actions: List[RegAction],
         world_state_facts: dict,
     ):
@@ -196,15 +90,10 @@ class Automaton:
 
     def __sense_environment(self):
         for sensor in self.sensors:
-            self.working_memory.append(
-                Fact(
-                    parent_sensor=sensor.name,
-                    data=sensor.exec(),
-                    binding=sensor.binding,
-                )
-            )
+            self.working_memory.append(sensor())
+        logger.info(f"Working memory: {self.working_memory}")
         for fact in self.working_memory:
-            setattr(self.world_state, fact.binding, fact.data.response)
+            setattr(self.world_state, fact.binding, fact.data)
 
     def __set_action_plan(self):
 
@@ -295,14 +184,8 @@ class Automaton:
 class AutomatonController(object):
 
     def __init__(
-        self, actions: List[RegAction], sensors: List[Sensor], name: str, world_state: dict
+        self, actions: List[RegAction], sensors: Sensors, name: str, world_state: dict
     ):
-        """
-        :param actions: List of actions
-        :param sensors: List of sensors
-        :param name: Name of the automaton
-        :param world_state: Initial world state
-        """
         self.automaton = Automaton(
             actions=actions,
             sensors=sensors,
@@ -330,99 +213,45 @@ class AutomatonController(object):
         while True:
             self.automaton.sense()
             if self.automaton.world_state != self.goal:
-                print(
-                    "World state differs from goal: \nState: {}\nGoal: {}".format(
-                        self.automaton.world_state, self.goal
-                    )
-                )
-                print("Need to find an action plan")
+                logger.info(f"World state differs from goal:\nState: {self.automaton.world_state}\nGoal: {self.goal}")
+                logger.info("Need to find an action plan")
                 self.automaton.plan()
-                print(
-                    "Plan found. Will execute the action plan: {}".format(
-                        self.automaton.action_plan
-                    )
-                )
+                logger.info(f"Plan found. Will execute the action plan: {self.automaton.action_plan}")
                 self.automaton.act()
             else:
-                print("World state equals to goal: {}".format(self.goal))
+                logger.info(f"World state equals to goal: {self.goal}")
                 self.automaton.wait()
             sleep(5)
 
 
-from typing import Optional, Tuple
-from subprocess import Popen, PIPE
+class DirectoryStateSensor(RegSensor):
+    binding = "tmp_dir_state"
+    def exec(self):
+        tmp_path = Path("/tmp/goap_tmp")
+        out =  "exist" if tmp_path.exists() else "not_exist"
+        return out
 
-
-class ShellCommand(object):
-    """Creates an callable object which executes a shell command"""
-
-    def __init__(self, command: str, timeout: int = 30):
-        self.command = command
-        self.timeout = timeout
-        self.response = None
-
-    def __call__(self):
-        return self.run(self.command)
-
-    def run(self, command=Optional[str]) -> Tuple[str, str, int]:
-        process = Popen(
-            ["/bin/sh", "-c", command],
-            shell=False,
-            stdout=PIPE,
-            stderr=PIPE,
-            universal_newlines=True,
-        )
-        try:
-            stdout, stderr = process.communicate(timeout=self.timeout)
-            return_code = process.returncode
-            self.response = (stdout.strip().split(" ")[-1], stderr, return_code)
-        except RuntimeError as e:
-            raise Exception(f"Error opening process {self.command}: {e}")
-        finally:
-            process.kill()
-
-        return self.response
-
-
-def setup_sensors():
-    sense_dir_state = ShellCommand(
-        command='if [ -d "/tmp/goap_tmp" ]; then echo -n "exist"; else echo -n "not_exist"; fi'
-    )
-    sense_dir_content = ShellCommand(
-        command='[ -f /tmp/goap_tmp/.token ] && echo -n "token_found" || echo -n "token_not_found"'
-    )
-    sensors = [
-        Sensor(name="SenseTmpDirState", func=sense_dir_state, binding="tmp_dir_state"),
-        Sensor(
-            name="SenseTmpDirContent", func=sense_dir_content, binding="tmp_dir_content"
-        ),
-    ]
-    return sensors
+class TokenStateSensor(RegSensor):
+    binding = "tmp_dir_content"
+    def exec(self):
+        token_path = Path("/tmp/goap_tmp") / ".token"
+        out = "token_found" if token_path.exists() else "token_not_found"
+        return out
 
 
 class CreateTmpDir(RegAction):
     effects = {"tmp_dir_state": "exist", "tmp_dir_content": "token_not_found"}
     preconditions = {"tmp_dir_state": "not_exist", "tmp_dir_content": "token_not_found"}
 
-    def func(self):
-        return ShellCommand(command="mkdir -p /tmp/goap_tmp")()
-
+    def exec(self):
+        Path("/tmp/goap_tmp").mkdir(parents=True, exist_ok=True)
 
 class CreateToken(RegAction):
     effects = {"tmp_dir_state": "exist", "tmp_dir_content": "token_found"}
     preconditions = {"tmp_dir_state": "exist", "tmp_dir_content": "token_not_found"}
 
-    def func(self):
-        return ShellCommand(command="touch /tmp/goap_tmp/.token")()
-
-
-def setup_actions():
-    actions = [
-        CreateTmpDir(),
-        CreateToken(),
-    ]
-    print(f"actions: {actions}")
-    return actions
+    def exec(self):
+        (Path("/tmp/goap_tmp") / ".token").touch()
 
 
 def setup_automaton():
@@ -438,8 +267,8 @@ def setup_automaton():
     }
     automaton = AutomatonController(
         name="directory_watcher",
-        actions=setup_actions(),
-        sensors=setup_sensors(),
+        actions=[CreateTmpDir(), CreateToken()],
+        sensors=[DirectoryStateSensor(), TokenStateSensor()],
         world_state=world_state_matrix,
     )
     return automaton
