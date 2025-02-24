@@ -147,6 +147,10 @@ class RegGoal:
 
     def __repr__(self):
         return self.__str__()
+    
+    @property
+    def name(self):
+        return self.__class__.__name__
 
 
 @dataclass(frozen=True)

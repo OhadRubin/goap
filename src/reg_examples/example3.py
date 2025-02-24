@@ -1,5 +1,7 @@
 from src.goap import AutomatonController, RegAction, RegSensor, RegGoal
 from pathlib import Path
+import fire
+
 
 class DirectoryStateSensor(RegSensor):
     binding = "tmp_dir_state"
@@ -35,31 +37,53 @@ class CreateToken(RegAction):
         (Path("/tmp/goap_tmp") / ".token").touch()
 
 
+class Relax(RegAction):
+    effects = {"is_relaxed": True}
+    preconditions = {"is_relaxed": False}
+
+    def exec(self):
+        pass
+
+
 class CreateTokenGoal(RegGoal):
     desired_state = {"tmp_dir_state": "exist", "tmp_dir_content": "token_found"}
     priority = 1
-import fire
+
+class RelaxGoal(RegGoal):
+    preconditions = {"tmp_dir_state": "exist", "tmp_dir_content": "token_found"}
+    desired_state = {"is_relaxed": True}
+    priority = 2
+
+
 def start():
+    reset()
     world_state_matrix = {
         "tmp_dir_state": "Unknown",
         "tmp_dir_content": "Unknown",
+        "is_relaxed": False,
     }
     dir_handler = AutomatonController(
         name="directory_watcher",
-        actions=[CreateTmpDir(), CreateToken()],
+        actions=[CreateTmpDir(), CreateToken(), Relax()],
         sensors=[DirectoryStateSensor(), TokenStateSensor()],
         world_state=world_state_matrix,
-        initial_goal=CreateTokenGoal(),
+        initial_goal_name="CreateTokenGoal",
+        possible_goals={
+            "CreateTokenGoal": CreateTokenGoal(),
+            "RelaxGoal": RelaxGoal(),
+        },
     )
     dir_handler.start()
 
 
 def reset():
-    Path("/tmp/goap_tmp/.token").unlink()
-    Path("/tmp/goap_tmp").rmdir()
+    try:
+        Path("/tmp/goap_tmp/.token").unlink()
+        Path("/tmp/goap_tmp").rmdir()
+    except FileNotFoundError:
+        pass
 
 
 # usage: python -m reg_examples.example3 start
-# usage: python -m reg_examples.example3 reset
 if __name__ == "__main__":
     fire.Fire({"start": start, "reset": reset})

@@ -68,6 +68,11 @@ class WorldState(dict):
     def __hash__(self):
         return hash(tuple(sorted(self.items())))
 
+from typing import Any
+
+def condition_met(world_state: WorldState, condition_dict: Dict[str, Any]) -> bool:
+    return all(world_state.get(k, None) == v for k, v in condition_dict.items())
+
 
 class Automaton:
     """A 3 State Machine Automaton: observing (aka monitor or patrol), planning and acting"""
@@ -97,7 +102,7 @@ class Automaton:
 
     def __sense_environment(self):
         for sensor in self.sensors:
-            if not all(self.world_state.get(k) == v for k, v in sensor.preconditions.items()):
+            if not condition_met(self.world_state, sensor.preconditions):
                 continue
             self.working_memory.append(sensor())
         logger.info(f"Working memory: {self.working_memory}")
@@ -193,34 +198,51 @@ class Automaton:
 class AutomatonController(object):
 
     def __init__(
-        self, actions: List[RegAction], sensors: Sensors, name: str, world_state: dict, initial_goal: RegGoal
+        self,
+        actions: List[RegAction],
+        sensors: Sensors,
+        name: str,
+        world_state: dict,
+        initial_goal_name: str,
+        possible_goals: Dict[str, RegGoal],
     ):
-        self.automaton = Automaton(
-            actions=actions,
-            sensors=sensors,
-            name=name,
-            world_state_facts=world_state,
-        )
-        self.initial_goal = initial_goal
+        self.actions = actions
+        self.sensors = sensors
+        self.name = name
+        self.initial_world_state = world_state
         self.goal = None
 
-    @property
-    def world_state(self):
-        return self.automaton.world_state
+        self.possible_goals = possible_goals
+        self.initial_goal = possible_goals[initial_goal_name]
 
-    @world_state.setter
-    def world_state(self, value):
-        self.automaton.world_state = value
+    def update_goal(self, value, world_state):
 
-    def update_goal(self, value):
         self.goal = value
+        self.automaton = Automaton(
+            actions=self.actions,
+            sensors=self.sensors,
+            name=self.name,
+            world_state_facts=world_state,
+        )
         self.automaton.input_goal(value.desired_state)
 
     def start(self):
-        self.update_goal(self.initial_goal)
+        self.update_goal(self.initial_goal, self.initial_world_state)
         while True:
             self.automaton.sense()
-            if self.automaton.world_state != self.goal.desired_state:
+            # Find highest priority eligible goal
+            max_priority_goal = self.goal
+            for goal in self.possible_goals.values():
+                if (goal.priority > max_priority_goal.priority and condition_met(self.automaton.world_state, goal.preconditions)):
+                    max_priority_goal = goal
+
+            if max_priority_goal is not self.goal:
+                logger.info(f"Switching to higher priority goal: {max_priority_goal.name}")
+                self.update_goal(max_priority_goal, self.automaton.world_state)
+                self.automaton.sense() # we need to sense the environment again after updating the goal
+
+            # if self.automaton.world_state != self.goal.desired_state:
+            if not condition_met(self.automaton.world_state, self.goal.desired_state):
                 logger.info(f"World state differs from goal:\nState: {self.automaton.world_state}\nGoal: {self.goal}")
                 logger.info("Need to find an action plan")
                 self.automaton.plan()
@@ -229,5 +251,4 @@ class AutomatonController(object):
             else:
                 logger.info(f"World state equals to goal: {self.goal}")
                 self.automaton.wait()
-            sleep(5)
-
+            sleep(1)
