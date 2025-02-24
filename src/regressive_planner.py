@@ -117,7 +117,7 @@ class RegSensorValidator(type):
 
 
 class RegSensor(metaclass=RegSensorValidator):
-    # preconditions: ClassVar[State] = {}
+    preconditions: ClassVar[State] = {}
     binding: ClassVar[str] = ""
 
     def exec(self) -> str:
@@ -134,6 +134,19 @@ class RegSensor(metaclass=RegSensorValidator):
     @property
     def name(self):
         return self.__class__.__name__
+
+
+class RegGoal:
+    preconditions: ClassVar[State] = {}
+    desired_state: ClassVar[State] = {}
+    priority: ClassVar[int] = 0
+    
+    def __str__(self):
+        state_str = "{" + ", ".join(f"{k}={v}" for k,v in self.desired_state.items()) + "}"
+        return f"{self.__class__.__name__}(priority={self.priority}, state={state_str})"
+
+    def __repr__(self):
+        return self.__str__()
 
 
 @dataclass(frozen=True)

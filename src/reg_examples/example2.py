@@ -8,16 +8,23 @@ from src.regressive_planner import RegressivePlanner, RegAction, reference
 
 
 class HauntWithMagic(RegAction):
+    # Requires being undead and having performed magic with "abracadabra" spell
+    # Results in making something spooky
     effects = dict(is_spooky=True)
     preconditions = dict(is_undead=True, performs_magic="abracadabra")
 
 
 class BecomeUndead(RegAction):
+    # Requires not being undead yet
+    # Results in becoming undead
     effects = dict(is_undead=True)
     preconditions = dict(is_undead=False)
 
 
 class PerformMagic(RegAction):
+    # The ... means this action provides a service value that will be passed to other actions
+    # The value "abracadabra" will be passed to both chant_incantation and cast_spell
+    # through the reference() function
     effects = dict(performs_magic=...)
     preconditions = dict(
         chant_incantation=reference("performs_magic"),

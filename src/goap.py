@@ -1,4 +1,11 @@
-from src.regressive_planner import RegressivePlanner, RegAction, reference, State, RegSensor
+from src.regressive_planner import (
+    RegressivePlanner,
+    RegAction,
+    reference,
+    State,
+    RegSensor,
+    RegGoal,
+)
 
 from loguru import logger
 
@@ -90,6 +97,8 @@ class Automaton:
 
     def __sense_environment(self):
         for sensor in self.sensors:
+            if not all(self.world_state.get(k) == v for k, v in sensor.preconditions.items()):
+                continue
             self.working_memory.append(sensor())
         logger.info(f"Working memory: {self.working_memory}")
         for fact in self.working_memory:
@@ -184,7 +193,7 @@ class Automaton:
 class AutomatonController(object):
 
     def __init__(
-        self, actions: List[RegAction], sensors: Sensors, name: str, world_state: dict
+        self, actions: List[RegAction], sensors: Sensors, name: str, world_state: dict, initial_goal: RegGoal
     ):
         self.automaton = Automaton(
             actions=actions,
@@ -192,6 +201,8 @@ class AutomatonController(object):
             name=name,
             world_state_facts=world_state,
         )
+        self.initial_goal = initial_goal
+        self.goal = None
 
     @property
     def world_state(self):
@@ -201,18 +212,15 @@ class AutomatonController(object):
     def world_state(self, value):
         self.automaton.world_state = value
 
-    @property
-    def goal(self):
-        return self.automaton.goal
-
-    @goal.setter
-    def goal(self, value):
-        self.automaton.input_goal(value)
+    def update_goal(self, value):
+        self.goal = value
+        self.automaton.input_goal(value.desired_state)
 
     def start(self):
+        self.update_goal(self.initial_goal)
         while True:
             self.automaton.sense()
-            if self.automaton.world_state != self.goal:
+            if self.automaton.world_state != self.goal.desired_state:
                 logger.info(f"World state differs from goal:\nState: {self.automaton.world_state}\nGoal: {self.goal}")
                 logger.info("Need to find an action plan")
                 self.automaton.plan()
@@ -223,66 +231,3 @@ class AutomatonController(object):
                 self.automaton.wait()
             sleep(5)
 
-
-class DirectoryStateSensor(RegSensor):
-    binding = "tmp_dir_state"
-    def exec(self):
-        tmp_path = Path("/tmp/goap_tmp")
-        out =  "exist" if tmp_path.exists() else "not_exist"
-        return out
-
-class TokenStateSensor(RegSensor):
-    binding = "tmp_dir_content"
-    def exec(self):
-        token_path = Path("/tmp/goap_tmp") / ".token"
-        out = "token_found" if token_path.exists() else "token_not_found"
-        return out
-
-
-class CreateTmpDir(RegAction):
-    effects = {"tmp_dir_state": "exist", "tmp_dir_content": "token_not_found"}
-    preconditions = {"tmp_dir_state": "not_exist", "tmp_dir_content": "token_not_found"}
-
-    def exec(self):
-        Path("/tmp/goap_tmp").mkdir(parents=True, exist_ok=True)
-
-class CreateToken(RegAction):
-    effects = {"tmp_dir_state": "exist", "tmp_dir_content": "token_found"}
-    preconditions = {"tmp_dir_state": "exist", "tmp_dir_content": "token_not_found"}
-
-    def exec(self):
-        (Path("/tmp/goap_tmp") / ".token").touch()
-
-
-def setup_automaton():
-    """
-    Set up an automaton with the specified planner type
-
-    :param planner_type: Type of planner to use ("regressive" or "nx"). Defaults to "regressive"
-    :return: Configured AutomatonController instance
-    """
-    world_state_matrix = {
-        "tmp_dir_state": "Unknown",
-        "tmp_dir_content": "Unknown",
-    }
-    automaton = AutomatonController(
-        name="directory_watcher",
-        actions=[CreateTmpDir(), CreateToken()],
-        sensors=[DirectoryStateSensor(), TokenStateSensor()],
-        world_state=world_state_matrix,
-    )
-    return automaton
-
-
-def main():
-    goal = {
-        "tmp_dir_state": "exist",
-        "tmp_dir_content": "token_found",
-    }
-    dir_handler = setup_automaton()  # or setup_automaton("nx") to use NXPlanner
-    dir_handler.goal = goal
-    dir_handler.start()
-
-
-if __name__ == "__main__":
-    main()
