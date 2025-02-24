@@ -22,15 +22,15 @@ class TokenStateSensor(RegSensor):
 
 
 class CreateTmpDir(RegAction):
-    effects = {"tmp_dir_state": "exist", "tmp_dir_content": "token_not_found"}
-    preconditions = {"tmp_dir_state": "not_exist", "tmp_dir_content": "token_not_found"}
+    effects = {"tmp_dir_state": "exist"}
+    preconditions = {"tmp_dir_state": "not_exist"}
 
     def exec(self):
         Path("/tmp/goap_tmp").mkdir(parents=True, exist_ok=True)
 
 
 class CreateToken(RegAction):
-    effects = {"tmp_dir_state": "exist", "tmp_dir_content": "token_found"}
+    effects = {"tmp_dir_content": "token_found"}
     preconditions = {"tmp_dir_state": "exist", "tmp_dir_content": "token_not_found"}
 
     def exec(self):
@@ -58,8 +58,8 @@ class RelaxGoal(RegGoal):
 def start():
     reset()
     world_state_matrix = {
-        "tmp_dir_state": "Unknown",
-        "tmp_dir_content": "Unknown",
+        "tmp_dir_state": "not_exist",
+        "tmp_dir_content": "token_not_found",
         "is_relaxed": False,
     }
     dir_handler = AutomatonController(
@@ -67,11 +67,8 @@ def start():
         actions=[CreateTmpDir(), CreateToken(), Relax()],
         sensors=[DirectoryStateSensor(), TokenStateSensor()],
         world_state=world_state_matrix,
-        initial_goal_name="CreateTokenGoal",
-        possible_goals={
-            "CreateTokenGoal": CreateTokenGoal(),
-            "RelaxGoal": RelaxGoal(),
-        },
+        
+        possible_goals=[CreateTokenGoal(),RelaxGoal()],
     )
     dir_handler.start()
 

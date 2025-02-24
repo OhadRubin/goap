@@ -41,7 +41,7 @@ class CastSpell(RegAction):
     effects = dict(cast_spell=...)
     preconditions = {}
     
-    def func(self):
+    def exec(self):
         print("Casting spell")
 
 

@@ -58,6 +58,8 @@ class WorldState(dict):
             if other.__dict__()[k] != v:
                 return False
         return True
+    def condition_met(self, condition_dict: Dict[str, Any]) -> bool:
+        return all(self.get(k, None) == v for k, v in condition_dict.items())
 
     def __eq__(self, other):
         if other.items() != self.items():
@@ -70,9 +72,44 @@ class WorldState(dict):
 
 from typing import Any
 
-def condition_met(world_state: WorldState, condition_dict: Dict[str, Any]) -> bool:
-    return all(world_state.get(k, None) == v for k, v in condition_dict.items())
 
+# #
+# # Executes plan. This function is called on every game loop.
+# # "plan" is the current list of actions, and delta is the time since last loop.
+# #
+# # Every action exposes a function called perform, which will return true when
+# # the job is complete, so the agent can jump to the next action in the list.
+# #
+# func _follow_plan(plan, delta):
+# 	if plan.size() == 0:
+# 		return
+
+# 	var is_step_complete = plan[_current_plan_step].perform(_actor, delta)
+# 	if is_step_complete and _current_plan_step < plan.size() - 1:
+# 		_current_plan_step += 1
+
+# On every loop this script checks if the current goal is still
+# the highest priority. if it's not, it requests the action planner a new plan
+# for the new high priority goal.
+#
+# func _process(delta):
+# 	var goal = _update_best_goal()
+# 	if _current_goal == null or goal != _current_goal:
+# 	# You can set in the blackboard any relevant information you want to use
+# 	# when calculating action costs and status. I'm not sure here is the best
+# 	# place to leave it, but I kept here to keep things simple.
+# 		var blackboard = {
+# 			"position": _actor.position,
+# 			}
+
+# 		for s in WorldState._state:
+# 			blackboard[s] = WorldState._state[s]
+
+# 		_current_goal = goal
+# 		_current_plan = Goap.get_action_planner().get_plan(_current_goal, blackboard)
+# 		_current_plan_step = 0
+# 	else:
+# 		_follow_plan(_current_plan, delta)
 
 class Automaton:
     """A 3 State Machine Automaton: observing (aka monitor or patrol), planning and acting"""
@@ -93,34 +130,51 @@ class Automaton:
         self.sensors = sensors
         self.actions = actions
         self.planner = RegressivePlanner(self.world_state, self.actions)
-
         self.action_plan = []
         self.action_plan_response = None
         self.sensors_responses = {}
-        self.actions_response = []
-        self.goal = {}
+        self._current_plan_step = 0
+        self._changed_facts = {}
+        self.plan_for_goal = None
 
     def __sense_environment(self):
         for sensor in self.sensors:
-            if not condition_met(self.world_state, sensor.preconditions):
+            if not self.world_state.condition_met(sensor.preconditions):
                 continue
             self.working_memory.append(sensor())
-        logger.info(f"Working memory: {self.working_memory}")
+        _changed_facts = {}
         for fact in self.working_memory:
+            prev_value = self.world_state.get(fact.binding, None)
+            if prev_value != fact.data:
+                _changed_facts[fact.binding] = prev_value
             setattr(self.world_state, fact.binding, fact.data)
+        self._changed_facts = _changed_facts
 
     def __set_action_plan(self):
-
-        self.action_plan = self.planner.find_plan(self.goal, self.world_state)
+        # if either the world state has changed or we changed goals.
+        if self.plan_for_goal == self.goal:
+            # and len(self._changed_facts)==0:
+            logger.info(f"Len of the plan: {len(self.action_plan)}")
+            return self.action_plan
+        logger.info(f"world state and actions: {self.world_state} {self.actions}")
+        planner = RegressivePlanner(self.world_state, self.actions)
+        self.action_plan = planner.find_plan(self.goal)
+        self.plan_for_goal = self.goal
+        self._current_plan_step = 0
+        logger.info(f"Len of the plan: {len(self.action_plan)}")
         return self.action_plan
 
     def __execute_action_plan(self):
-        response = []
-        for step in self.action_plan:
-            result = step.action.exec()
-            response.append(result)
-        self.actions_response = response
-        return "Action planning execution results: {}".format(self.action_plan_response)
+        effects = {}
+        if self._current_plan_step < len(self.action_plan):
+            curr_step = self.action_plan[self._current_plan_step]
+            logger.info(f"Executing action: {curr_step.action}")
+            curr_step.action.exec()
+            effects = curr_step.action.effects
+            for key,value in effects.items():
+                setattr(self.world_state, key, value)
+            self._current_plan_step += 1
+        return effects
 
     @machine.state(initial=True)
     def waiting_orders(self):
@@ -167,7 +221,7 @@ class Automaton:
     @machine.output()
     def __act(self):
         """Execute action plan"""
-        self.__execute_action_plan()
+        return self.__execute_action_plan()
 
     @machine.input()
     def input_goal(self, goal):
@@ -203,7 +257,6 @@ class AutomatonController(object):
         sensors: Sensors,
         name: str,
         world_state: dict,
-        initial_goal_name: str,
         possible_goals: Dict[str, RegGoal],
     ):
         self.actions = actions
@@ -211,44 +264,50 @@ class AutomatonController(object):
         self.name = name
         self.initial_world_state = world_state
         self.goal = None
-
         self.possible_goals = possible_goals
-        self.initial_goal = possible_goals[initial_goal_name]
-
-    def update_goal(self, value, world_state):
-
-        self.goal = value
+        self._world_state = world_state
         self.automaton = Automaton(
             actions=self.actions,
             sensors=self.sensors,
             name=self.name,
             world_state_facts=world_state,
         )
-        self.automaton.input_goal(value.desired_state)
+
+    def update_goal(self):
+        self.automaton.input_goal(self.goal.desired_state)
+
+    def update_best_goal(self):
+        max_priority_goal = self.goal if self.goal else None
+        for goal in self.possible_goals:
+            if max_priority_goal is None or (
+                goal.priority > max_priority_goal.priority
+                and self.world_state.condition_met(goal.preconditions)
+            ):
+                max_priority_goal = goal
+        if max_priority_goal is not self.goal:
+            self.goal = max_priority_goal
+            return True
+        return False
+
+    @property
+    def world_state(self):
+        if self.automaton is not None:
+            return self.automaton.world_state
+        return self._world_state
 
     def start(self):
-        self.update_goal(self.initial_goal, self.initial_world_state)
         while True:
+            if self.update_best_goal():
+                logger.info(f"Switching to higher priority goal: {self.goal.name}")
+                self.update_goal()
             self.automaton.sense()
-            # Find highest priority eligible goal
-            max_priority_goal = self.goal
-            for goal in self.possible_goals.values():
-                if (goal.priority > max_priority_goal.priority and condition_met(self.automaton.world_state, goal.preconditions)):
-                    max_priority_goal = goal
 
-            if max_priority_goal is not self.goal:
-                logger.info(f"Switching to higher priority goal: {max_priority_goal.name}")
-                self.update_goal(max_priority_goal, self.automaton.world_state)
-                self.automaton.sense() # we need to sense the environment again after updating the goal
-
-            # if self.automaton.world_state != self.goal.desired_state:
-            if not condition_met(self.automaton.world_state, self.goal.desired_state):
-                logger.info(f"World state differs from goal:\nState: {self.automaton.world_state}\nGoal: {self.goal}")
-                logger.info("Need to find an action plan")
+            if not self.world_state.condition_met(self.goal.desired_state):
+                logger.info(f"World state differs from goal:\nState: {self.world_state}\nGoal: {self.goal}")
                 self.automaton.plan()
                 logger.info(f"Plan found. Will execute the action plan: {self.automaton.action_plan}")
                 self.automaton.act()
             else:
                 logger.info(f"World state equals to goal: {self.goal}")
                 self.automaton.wait()
-            sleep(1)
+            sleep(5)
