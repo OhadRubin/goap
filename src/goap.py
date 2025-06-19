@@ -8,7 +8,6 @@ from src.regressive_planner import (
 )
 
 from loguru import logger
-
 from typing import Callable, List
 import subprocess
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ from abc import ABC, abstractmethod
 from time import sleep
 from automat import MethodicalMachine
 from typing import Tuple, Dict
+from typing import List, Any, Dict
 
 Sensors = List[RegSensor]
 
@@ -236,11 +236,12 @@ class Automaton:
     def __reset_working_memory(self):
         self.working_memory = []
 
+    
     # cyclical main states
     waiting_orders.upon(sense, enter=sensing, outputs=[__sense])
     sensing.upon(plan, enter=planning, outputs=[__plan])
     planning.upon(act, enter=acting, outputs=[__act])
-    acting.upon(sense, enter=sensing, outputs=[__reset_working_memory, __sense])
+    acting.upon(sense, enter=sensing, outputs=[ __reset_working_memory, __sense])
     # change orders
     waiting_orders.upon(input_goal, enter=waiting_orders, outputs=[__input_goal])
     planning.upon(input_goal, enter=waiting_orders, outputs=[__input_goal])
@@ -283,6 +284,26 @@ class AutomatonController(object):
                 goal.priority > max_priority_goal.priority
                 and self.world_state.condition_met(goal.preconditions)
             ):
+                max_priority_goal = goal
+        if max_priority_goal is not self.goal:
+            self.goal = max_priority_goal
+            return True
+        return False
+
+    def update_best_goal(self):
+        max_priority_goal = None
+        max_priority = -float("inf")
+        for goal in self.possible_goals:
+            if hasattr(goal, "is_valid") and not goal.is_valid(self.world_state):
+                continue
+            if not self.world_state.condition_met(goal.preconditions):
+                continue
+            if hasattr(goal, "get_priority"):
+                p = goal.get_priority(self.world_state)
+            else:
+                p = goal.priority
+            if p > max_priority:
+                max_priority = p
                 max_priority_goal = goal
         if max_priority_goal is not self.goal:
             self.goal = max_priority_goal
