@@ -86,8 +86,26 @@ In the agent's `step()` method, sensors are run first, before planning or action
 The execution order is critical: Sense → Plan → Act.
 """
 class Sensor:
-    def __init__(self):
-        pass
+    def __init__(self, name: str, callback: callable):
+        """Initialize a sensor with an identifying name and callback function.
+        
+        Args:
+            name: Identifier for the sensor (e.g., "vision", "health_monitor")
+            callback: A callable function that updates world state.
+                     Should have signature: callback(agent_state: dict) -> None
+        """
+        self.name = name
+        self.callback = callback
     
-    def run(self):
-        pass
+    def run(self, agent_state: dict) -> None:
+        """Execute the stored callback function with the agent's current state.
+        
+        The callback is expected to:
+        - Read from the game world/environment
+        - Update the agent_state dictionary with new information
+        - Not return any value (modifications happen in-place)
+        
+        Args:
+            agent_state: The agent's current state dictionary to update
+        """
+        self.callback(agent_state)

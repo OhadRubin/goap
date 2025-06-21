@@ -109,11 +109,168 @@ class ExecutionStatus(Enum):
 
 
 class Action:
-    def __init__(self):
-        pass
+    def __init__(self, name: str, cost: float, preconditions: Dict[str, Any], 
+                 effects: Dict[str, Any], executor: callable, 
+                 parameterizers: list | None = None):
+        """Initialize an action template.
+        
+        Args:
+            name: Identifier for the action
+            cost: Base cost for planning (may be modified by parameters)
+            preconditions: Dictionary of world state requirements
+            effects: Dictionary of changes to world state
+            executor: Callable that performs the actual action logic
+            parameterizers: Optional list for generating concrete variants
+        """
+        self.name = name
+        self.cost = cost
+        self.preconditions = preconditions.copy()
+        self.effects = effects.copy()
+        self.executor = executor
+        self.parameterizers = parameterizers or []
     
-    def is_possible(self):
-        pass
+    def is_possible(self, state: Dict[str, Any]) -> bool:
+        """Check if the action's preconditions are met by a given world state.
+        
+        Args:
+            state: Current world state dictionary
+            
+        Returns:
+            True if all preconditions are satisfied, False otherwise
+        """
+        for key, value in self.preconditions.items():
+            if key not in state:
+                return False
+                
+            state_value = state[key]
+            
+            # Handle comparative preconditions (e.g., "health > 50")
+            if isinstance(value, str) and any(op in value for op in ['>', '<', '>=', '<=', '==']):
+                if not self._evaluate_comparison(state_value, value):
+                    return False
+            else:
+                # Handle standard key-value preconditions
+                if state_value != value:
+                    return False
+                    
+        return True
     
-    def apply_effects(self):
-        pass
+    def apply_effects(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply the action's effects to a world state and return a new state.
+        
+        Args:
+            state: Input world state dictionary
+            
+        Returns:
+            New state dictionary with effects applied
+        """
+        new_state = state.copy()
+        
+        for key, value in self.effects.items():
+            # Handle arithmetic modifications (e.g., "health: +10")
+            if isinstance(value, str) and value.startswith(('+', '-')):
+                if key in new_state:
+                    try:
+                        current_value = new_state[key]
+                        modifier = float(value)
+                        new_state[key] = current_value + modifier
+                    except (ValueError, TypeError):
+                        # If arithmetic fails, treat as simple assignment
+                        new_state[key] = value
+                else:
+                    # Key doesn't exist, can't do arithmetic
+                    new_state[key] = value
+            else:
+                # Handle simple value assignments (e.g., "door_open: true")
+                new_state[key] = value
+                
+        return new_state
+    
+    def _evaluate_comparison(self, state_value: Any, condition: str) -> bool:
+        """Evaluate comparative conditions like 'health > 50'.
+        
+        Args:
+            state_value: Current value from world state
+            condition: Comparison condition string
+            
+        Returns:
+            True if comparison is satisfied, False otherwise
+        """
+        try:
+            # Parse comparison operators
+            if '>=' in condition:
+                parts = condition.split('>=')
+                if len(parts) == 2:
+                    threshold = float(parts[1].strip())
+                    return float(state_value) >= threshold
+            elif '<=' in condition:
+                parts = condition.split('<=')
+                if len(parts) == 2:
+                    threshold = float(parts[1].strip())
+                    return float(state_value) <= threshold
+            elif '>' in condition:
+                parts = condition.split('>')
+                if len(parts) == 2:
+                    threshold = float(parts[1].strip())
+                    return float(state_value) > threshold
+            elif '<' in condition:
+                parts = condition.split('<')
+                if len(parts) == 2:
+                    threshold = float(parts[1].strip())
+                    return float(state_value) < threshold
+            elif '==' in condition:
+                parts = condition.split('==')
+                if len(parts) == 2:
+                    expected = parts[1].strip()
+                    # Try numeric comparison first
+                    try:
+                        return float(state_value) == float(expected)
+                    except ValueError:
+                        # Fall back to string comparison
+                        return str(state_value) == expected
+        except (ValueError, TypeError):
+            # If parsing fails, condition is not met
+            return False
+            
+        # If no valid comparison found, condition is not met
+        return False
+    
+
+def test_action_basic():
+    """Test basic action functionality."""
+    
+    def dummy_executor():
+        return ExecutionStatus.SUCCEEDED
+    
+    # Create a simple action
+    action = Action(
+        name="test_action",
+        cost=1.0,
+        preconditions={"has_key": True, "health": "> 30"},
+        effects={"door_open": True, "health": "+10"},
+        executor=dummy_executor
+    )
+    
+    # Test preconditions with valid state
+    valid_state = {"has_key": True, "health": 50}
+    assert action.is_possible(valid_state), "Action should be possible with valid state"
+    
+    # Test preconditions with invalid state  
+    invalid_state = {"has_key": False, "health": 50}
+    assert not action.is_possible(invalid_state), "Action should not be possible without key"
+    
+    # Test preconditions with low health
+    low_health_state = {"has_key": True, "health": 20}
+    assert not action.is_possible(low_health_state), "Action should not be possible with low health"
+    
+    # Test effects application
+    initial_state = {"has_key": True, "health": 40, "door_open": False}
+    new_state = action.apply_effects(initial_state)
+    assert new_state["door_open"] == True, "Door should be open after effect"
+    assert new_state["health"] == 50, "Health should increase by 10"
+    assert initial_state["health"] == 40, "Original state should be unchanged"
+    
+    print("All tests passed!")
+
+if __name__ == "__main__":
+    test_action_basic()

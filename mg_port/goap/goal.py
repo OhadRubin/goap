@@ -161,48 +161,313 @@ The Python version benefits from:
 
 """
 from enum import Enum
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Union
+import uuid
 
 
 class ComparisonOperator(Enum):
+    """Comparison operators for ComparativeGoal conditions."""
+    UNDEFINED = "undefined"
     EQUALS = "equals"
     NOT_EQUALS = "not_equals"
     LESS_THAN = "less_than"
+    LESS_THAN_OR_EQUALS = "less_than_or_equals"
     GREATER_THAN = "greater_than"
+    GREATER_THAN_OR_EQUALS = "greater_than_or_equals"
 
 
+@dataclass
 class ComparisonValuePair:
-    def __init__(self):
-        self.operator = None
-        self.value = None
-
-
-class BaseGoal:
-    def __init__(self):
-        pass
+    """Pairs a comparison operator with a value for ComparativeGoal conditions."""
+    operator: ComparisonOperator
+    value: Any
     
-    def is_satisfied(self):
-        pass
+    def __init__(self, operator: ComparisonOperator = ComparisonOperator.UNDEFINED, value: Any = None):
+        self.operator = operator
+        self.value = value
 
 
-class Goal:
-    def __init__(self):
-        pass
+class BaseGoal(ABC):
+    """Abstract base class for all goal types."""
     
-    def is_satisfied(self):
-        pass
-
-
-class ComparativeGoal:
-    def __init__(self):
-        pass
+    def __init__(self, name: str = None, weight: float = 1.0):
+        """Initialize a base goal with name and weight.
+        
+        Args:
+            name: Goal identifier. If None, generates a unique name.
+            weight: Relative importance of this goal (higher = more important).
+        """
+        self.name = name if name is not None else f"Goal {uuid.uuid4()}"
+        self.weight = weight
     
-    def is_satisfied(self):
+    @abstractmethod
+    def is_satisfied(self, state: Dict[str, Any]) -> bool:
+        """Check if this goal is satisfied by the given world state.
+        
+        Args:
+            state: Current world state dictionary.
+            
+        Returns:
+            True if the goal is satisfied, False otherwise.
+        """
         pass
 
 
-class ExtremeGoal:
-    def __init__(self):
-        pass
+class Goal(BaseGoal):
+    """Concrete goal for achieving exact world states."""
     
-    def is_satisfied(self):
-        pass
+    def __init__(self, name: str = None, weight: float = 1.0, desired_state: Dict[str, Any] = None):
+        """Initialize an exact-state goal.
+        
+        Args:
+            name: Goal identifier.
+            weight: Relative importance of this goal.
+            desired_state: Dictionary of key-value pairs that must all match the world state.
+        """
+        super().__init__(name, weight)
+        self.desired_state = desired_state if desired_state is not None else {}
+    
+    def is_satisfied(self, state: Dict[str, Any]) -> bool:
+        """Check if all desired state conditions are met.
+        
+        Args:
+            state: Current world state dictionary.
+            
+        Returns:
+            True if all key-value pairs in desired_state match the world state.
+        """
+        for key, desired_value in self.desired_state.items():
+            if key not in state:
+                return False
+            
+            current_value = state[key]
+            
+            # Handle None values specially
+            if current_value is None and current_value != desired_value:
+                return False
+            
+            # Use equals comparison for non-None values
+            if current_value is not None and current_value != desired_value:
+                return False
+                
+        return True
+
+
+class ComparativeGoal(BaseGoal):
+    """Concrete goal for achieving states relative to threshold values."""
+    
+    def __init__(self, name: str = None, weight: float = 1.0, conditions: Dict[str, ComparisonValuePair] = None):
+        """Initialize a comparative goal.
+        
+        Args:
+            name: Goal identifier.
+            weight: Relative importance of this goal.
+            conditions: Dictionary mapping state keys to comparison conditions.
+        """
+        super().__init__(name, weight)
+        self.conditions = conditions if conditions is not None else {}
+    
+    def is_satisfied(self, state: Dict[str, Any]) -> bool:
+        """Check if all comparison conditions are met.
+        
+        Args:
+            state: Current world state dictionary.
+            
+        Returns:
+            True if all comparison conditions evaluate to True.
+        """
+        for key, comparison in self.conditions.items():
+            if key not in state:
+                return False
+                
+            current_value = state[key]
+            target_value = comparison.value
+            operator = comparison.operator
+            
+            # Undefined operator always fails
+            if operator == ComparisonOperator.UNDEFINED:
+                return False
+            
+            # Handle different comparison operators
+            if operator == ComparisonOperator.EQUALS:
+                if current_value != target_value:
+                    return False
+            elif operator == ComparisonOperator.NOT_EQUALS:
+                if current_value == target_value:
+                    return False
+            elif operator == ComparisonOperator.LESS_THAN:
+                if not self._is_less_than(current_value, target_value):
+                    return False
+            elif operator == ComparisonOperator.LESS_THAN_OR_EQUALS:
+                if not self._is_less_than_or_equals(current_value, target_value):
+                    return False
+            elif operator == ComparisonOperator.GREATER_THAN:
+                if not self._is_greater_than(current_value, target_value):
+                    return False
+            elif operator == ComparisonOperator.GREATER_THAN_OR_EQUALS:
+                if not self._is_greater_than_or_equals(current_value, target_value):
+                    return False
+                    
+        return True
+    
+    def _is_less_than(self, a: Any, b: Any) -> bool:
+        """Check if a < b for comparable types."""
+        if a is None or b is None:
+            return False
+        try:
+            return a < b
+        except (TypeError, ValueError):
+            return False
+    
+    def _is_less_than_or_equals(self, a: Any, b: Any) -> bool:
+        """Check if a <= b for comparable types."""
+        if a is None or b is None:
+            return False
+        try:
+            return a <= b
+        except (TypeError, ValueError):
+            return False
+    
+    def _is_greater_than(self, a: Any, b: Any) -> bool:
+        """Check if a > b for comparable types."""
+        if a is None or b is None:
+            return False
+        try:
+            return a > b
+        except (TypeError, ValueError):
+            return False
+    
+    def _is_greater_than_or_equals(self, a: Any, b: Any) -> bool:
+        """Check if a >= b for comparable types."""
+        if a is None or b is None:
+            return False
+        try:
+            return a >= b
+        except (TypeError, ValueError):
+            return False
+
+
+class ExtremeGoal(BaseGoal):
+    """Concrete goal for maximizing or minimizing numeric values.
+    
+    Note: ExtremeGoals never actually satisfy - they provide direction
+    for the planning heuristic to optimize values.
+    """
+    
+    def __init__(self, name: str = None, weight: float = 1.0, optimizations: Dict[str, bool] = None):
+        """Initialize an extreme goal.
+        
+        Args:
+            name: Goal identifier.
+            weight: Relative importance of this goal.
+            optimizations: Dictionary mapping state keys to optimization direction.
+                         True = maximize, False = minimize.
+        """
+        super().__init__(name, weight)
+        self.optimizations = optimizations if optimizations is not None else {}
+    
+    def is_satisfied(self, state: Dict[str, Any]) -> bool:
+        """ExtremeGoals are never satisfied - they provide optimization direction.
+        
+        Args:
+            state: Current world state dictionary (unused).
+            
+        Returns:
+            Always False - extreme goals guide heuristics, not termination.
+        """
+        return False
+    
+
+def test_basic_functionality():
+    """Test basic functionality of goal classes."""
+    # Test ComparisonOperator enum
+    print('Testing ComparisonOperator...')
+    assert ComparisonOperator.EQUALS.value == 'equals'
+    assert ComparisonOperator.GREATER_THAN.value == 'greater_than'
+    assert ComparisonOperator.LESS_THAN_OR_EQUALS.value == 'less_than_or_equals'
+    print('✓ ComparisonOperator works')
+    
+    # Test ComparisonValuePair
+    print('Testing ComparisonValuePair...')
+    cvp = ComparisonValuePair(ComparisonOperator.GREATER_THAN, 50)
+    assert cvp.operator == ComparisonOperator.GREATER_THAN
+    assert cvp.value == 50
+    print('✓ ComparisonValuePair works')
+    
+    # Test Goal (exact state)
+    print('Testing Goal...')
+    goal = Goal('test_goal', 1.0, {'health': 100, 'has_key': True})
+    assert goal.name == 'test_goal'
+    assert goal.weight == 1.0
+    assert goal.is_satisfied({'health': 100, 'has_key': True, 'extra': 'data'}) == True
+    assert goal.is_satisfied({'health': 50, 'has_key': True}) == False
+    assert goal.is_satisfied({'health': 100}) == False
+    print('✓ Goal works')
+    
+    # Test ComparativeGoal
+    print('Testing ComparativeGoal...')
+    conditions = {
+        'health': ComparisonValuePair(ComparisonOperator.GREATER_THAN_OR_EQUALS, 50),
+        'score': ComparisonValuePair(ComparisonOperator.LESS_THAN, 100)
+    }
+    comp_goal = ComparativeGoal('comp_goal', 2.0, conditions)
+    assert comp_goal.is_satisfied({'health': 75, 'score': 80}) == True
+    assert comp_goal.is_satisfied({'health': 30, 'score': 80}) == False
+    assert comp_goal.is_satisfied({'health': 75, 'score': 120}) == False
+    print('✓ ComparativeGoal works')
+    
+    # Test ExtremeGoal
+    print('Testing ExtremeGoal...')
+    extreme_goal = ExtremeGoal('extreme_goal', 3.0, {'gold': True, 'distance': False})
+    assert extreme_goal.is_satisfied({'gold': 1000, 'distance': 5}) == False
+    print('✓ ExtremeGoal works')
+    
+    print('All tests passed!')
+
+
+def test_inheritance():
+    """Test inheritance structure of goal classes."""
+    from abc import ABC
+    
+    # Test inheritance structure
+    print('Testing inheritance structure...')
+    assert issubclass(BaseGoal, ABC)
+    assert issubclass(Goal, BaseGoal)
+    assert issubclass(ComparativeGoal, BaseGoal)
+    assert issubclass(ExtremeGoal, BaseGoal)
+    
+    # Test that BaseGoal is abstract
+    try:
+        base = BaseGoal()
+        base.is_satisfied({})
+        assert False, 'BaseGoal should be abstract'
+    except TypeError:
+        print('✓ BaseGoal is properly abstract')
+    
+    # Test polymorphism
+    goals = [
+        Goal('test1', 1.0, {'key': 'value'}),
+        ComparativeGoal('test2', 2.0, {'num': ComparisonValuePair(ComparisonOperator.GREATER_THAN, 5)}),
+        ExtremeGoal('test3', 3.0, {'gold': True})
+    ]
+    
+    for goal in goals:
+        assert isinstance(goal, BaseGoal)
+        assert hasattr(goal, 'name')
+        assert hasattr(goal, 'weight')
+        assert hasattr(goal, 'is_satisfied')
+        assert callable(goal.is_satisfied)
+    
+    print('✓ Polymorphism works correctly')
+    print('All inheritance tests passed!')
+
+
+if __name__ == "__main__":
+    import sys
+    sys.path.append('.')
+    from goap.goal import *
+    
+    test_basic_functionality()
+    test_inheritance()

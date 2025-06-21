@@ -136,29 +136,190 @@ The Python version improves on the C# design by:
 ---
 
 """
-class Parameterizer:
-    def __init__(self):
-        pass
+from abc import ABC, abstractmethod
+from itertools import product
+from typing import List, Dict, Any
+
+
+class Parameterizer(ABC):
+    """Abstract base class for all parameter generators.
     
-    def generate(self):
-        pass
-
-
-class SelectFromCollection:
-    def __init__(self):
-        pass
+    Defines the interface that all parameterizers must implement.
+    Parameterizers are responsible for generating possible values
+    for action parameters based on the current world state.
+    """
     
-    def generate(self):
+    @abstractmethod
+    def generate(self, state: Dict[str, Any]) -> List[Any]:
+        """Generate possible parameter values based on world state.
+        
+        Args:
+            state: Current world state dictionary
+            
+        Returns:
+            List of possible parameter values
+        """
         pass
 
 
-class SelectFromState:
-    def __init__(self):
-        pass
+class SelectFromCollection(Parameterizer):
+    """Parameterizer that returns values from a predefined static collection.
     
-    def generate(self):
-        pass
+    Useful for fixed sets of options that don't change based on world state,
+    such as weapon types, spell schools, or movement directions.
+    """
+    
+    def __init__(self, collection: List[Any]):
+        """Initialize with a static collection of values.
+        
+        Args:
+            collection: List of values to choose from
+        """
+        if not isinstance(collection, list):
+            raise TypeError("Collection must be a list")
+        self.collection = collection.copy()  # Defensive copy
+    
+    def generate(self, state: Dict[str, Any]) -> List[Any]:
+        """Return the static collection, ignoring world state.
+        
+        Args:
+            state: Current world state (ignored)
+            
+        Returns:
+            Copy of the static collection
+        """
+        return [item for item in self.collection if item is not None]
 
 
-def generate_action_variants():
-    pass
+class SelectFromState(Parameterizer):
+    """Parameterizer that retrieves a collection from the world state.
+    
+    Useful for dynamic parameters that change based on world state,
+    such as visible enemies, available items, or discovered locations.
+    """
+    
+    def __init__(self, state_key: str):
+        """Initialize with the key to look up in world state.
+        
+        Args:
+            state_key: Key to look up in the world state dictionary
+        """
+        if not isinstance(state_key, str):
+            raise TypeError("State key must be a string")
+        if not state_key:
+            raise ValueError("State key cannot be empty")
+        self.state_key = state_key
+    
+    def generate(self, state: Dict[str, Any]) -> List[Any]:
+        """Retrieve collection from world state at the specified key.
+        
+        Args:
+            state: Current world state dictionary
+            
+        Returns:
+            List from state at state_key, or empty list if not found
+        """
+        if self.state_key not in state:
+            return []
+        
+        value = state[self.state_key]
+        
+        # Handle different types of collections
+        if isinstance(value, list):
+            return [item for item in value if item is not None]
+        elif hasattr(value, '__iter__') and not isinstance(value, (str, bytes)):
+            # Handle other iterables (sets, tuples, etc.)
+            return [item for item in value if item is not None]
+        else:
+            # Single value - wrap in list
+            return [value] if value is not None else []
+
+
+def generate_action_variants(action_template, state: Dict[str, Any]) -> List:
+    """Generate all possible concrete instances of an action template.
+    
+    Takes an action template with parameterizers and generates all possible
+    combinations of parameter values based on the current world state.
+    
+    Args:
+        action_template: Action template with parameterizers attribute
+        state: Current world state dictionary
+        
+    Returns:
+        List of concrete action instances with all parameter combinations
+        
+    Raises:
+        AttributeError: If action_template lacks required attributes
+        TypeError: If parameterizers is not a dictionary
+    """
+    # Validate input
+    if not hasattr(action_template, 'parameterizers'):
+        # No parameterizers - return single copy of the template
+        return [action_template]
+    
+    parameterizers = action_template.parameterizers
+    
+    if parameterizers is None or len(parameterizers) == 0:
+        # No parameterizers - return single copy of the template  
+        return [action_template]
+    
+    if not isinstance(parameterizers, dict):
+        raise TypeError("Parameterizers must be a dictionary")
+    
+    # Generate all possible parameter values
+    parameter_names = []
+    parameter_values = []
+    
+    for param_name, parameterizer in parameterizers.items():
+        if not isinstance(parameterizer, Parameterizer):
+            raise TypeError(f"Parameterizer for '{param_name}' must be a Parameterizer instance")
+        
+        values = parameterizer.generate(state)
+        
+        # If any parameterizer returns empty list, no variants possible
+        if not values:
+            return []
+        
+        parameter_names.append(param_name)
+        parameter_values.append(values)
+    
+    # Generate Cartesian product of all parameter combinations
+    variants = []
+    
+    if not parameter_values:
+        # No parameters to vary - return single copy
+        return [action_template]
+    
+    # Use itertools.product to generate all combinations
+    for combination in product(*parameter_values):
+        # Create new action instance (copy of template)
+        # This assumes action_template has a copy() method or similar
+        if hasattr(action_template, 'copy'):
+            variant = action_template.copy()
+        else:
+            # Fallback: try to create a new instance
+            # This may need adjustment based on actual Action class implementation
+            variant = type(action_template)(
+                name=getattr(action_template, 'name', 'action'),
+                cost=getattr(action_template, 'cost', 1.0),
+                preconditions=getattr(action_template, 'preconditions', {}),
+                effects=getattr(action_template, 'effects', {}),
+                executor=getattr(action_template, 'executor', lambda: None),
+                parameterizers=getattr(action_template, 'parameterizers', {})
+            )
+        
+        # Set parameters on the variant
+        for param_name, param_value in zip(parameter_names, combination):
+            if hasattr(variant, 'set_parameter'):
+                variant.set_parameter(param_name, param_value)
+            elif hasattr(variant, 'parameters'):
+                if not hasattr(variant, 'parameters') or variant.parameters is None:
+                    variant.parameters = {}
+                variant.parameters[param_name] = param_value
+            else:
+                # Fallback: set as attribute
+                setattr(variant, param_name, param_value)
+        
+        variants.append(variant)
+    
+    return variants

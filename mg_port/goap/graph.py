@@ -78,5 +78,45 @@ The Python version creates a cleaner abstraction by:
 ---
 
 """
-def get_successors():
-    pass
+def get_successors(current_state: dict, concrete_actions: list) -> list[tuple]:
+    """
+    Generate all valid state transitions from the current state.
+    
+    This is the core interface between the abstract graph concept and the concrete 
+    GOAP mechanics. For each action that can be executed from the current state, 
+    it returns the resulting state and the cost to get there.
+    
+    Args:
+        current_state: Dictionary representing the current world state
+        concrete_actions: List of Action objects that could potentially be executed
+        
+    Returns:
+        List of (action, new_state, cost) tuples representing all valid transitions
+        from the current state. Each tuple contains:
+        - action: The Action object that causes the transition
+        - new_state: Dictionary representing the resulting world state
+        - cost: Float representing the cost of executing this action
+    """
+    successors = []
+    
+    # Iterate through all available actions
+    for action in concrete_actions:
+        # Check if this action can be executed from the current state
+        if action.is_possible(current_state):
+            # Apply the action's effects to generate the new state
+            new_state = action.apply_effects(current_state)
+            
+            # Get the cost of executing this action
+            # Actions may have different cost calculation methods
+            if hasattr(action, 'get_cost'):
+                cost = action.get_cost(current_state)
+            elif hasattr(action, 'cost'):
+                cost = action.cost
+            else:
+                # Default cost if no cost information is available
+                cost = 1.0
+            
+            # Add this valid transition to the successors list
+            successors.append((action, new_state, cost))
+    
+    return successors

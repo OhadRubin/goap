@@ -137,21 +137,191 @@ The Python version benefits from:
 
 ---
 """
+import heapq
+from typing import Optional
+from .goal import BaseGoal, Goal, ComparativeGoal, ExtremeGoal, ComparisonOperator
+from .graph import get_successors
+
+
 class _SearchNode:
-    def __init__(self):
-        pass
+    """Private helper class representing a node in the A* search tree."""
     
-    def __lt__(self):
-        pass
+    def __init__(self, state: dict, action=None, parent=None, g_score: float = 0, h_score: float = 0):
+        self.state = state
+        self.action = action  # Action that led to this state (None for start)
+        self.parent = parent  # Reference to parent node for path reconstruction
+        self.g_score = g_score  # Actual cost from start to this node
+        self.h_score = h_score  # Heuristic estimate from this node to goal
+    
+    def __lt__(self, other) -> bool:
+        """Implements less-than comparison based on f-score (g + h) for heapq."""
+        return (self.g_score + self.h_score) < (other.g_score + other.h_score)
 
 
-def _reconstruct_path():
-    pass
+def _reconstruct_path(end_node: '_SearchNode') -> list:
+    """
+    Private helper that builds the final plan by tracing parent pointers 
+    from the goal node back to the start. Returns actions in forward order.
+    """
+    path = []
+    current = end_node
+    
+    # Trace back through parents, collecting actions
+    while current is not None and current.action is not None:
+        path.append(current.action)
+        current = current.parent
+    
+    # Reverse to get forward order (start to goal)
+    path.reverse()
+    return path
 
 
-def _calculate_heuristic():
-    pass
+def _calculate_heuristic(state: dict, goal: BaseGoal) -> float:
+    """
+    Private helper that estimates the "distance" from a state to a goal.
+    Implements different strategies based on goal type.
+    The heuristic must be admissible (never overestimate) for A* to guarantee optimal plans.
+    """
+    if isinstance(goal, Goal):
+        # Goal: Count of unmet conditions
+        cost = 0.0
+        for key, desired_value in goal.desired_state.items():
+            if key not in state:
+                cost += 1.0
+            elif state[key] != desired_value:
+                cost += 1.0
+        return cost
+    
+    elif isinstance(goal, ComparativeGoal):
+        # ComparativeGoal: Sum of numeric distances to thresholds
+        cost = 0.0
+        for key, comparison_pair in goal.conditions.items():
+            if key not in state:
+                cost += float('inf')  # Missing key is infinite cost
+                continue
+            
+            current_value = state[key]
+            target_value = comparison_pair.value
+            operator = comparison_pair.operator
+            
+            # Calculate distance based on operator
+            if operator == ComparisonOperator.EQUALS:
+                if current_value != target_value:
+                    # For numeric values, use absolute difference
+                    if isinstance(current_value, (int, float)) and isinstance(target_value, (int, float)):
+                        cost += abs(current_value - target_value)
+                    else:
+                        cost += 1.0  # Non-numeric mismatch
+            elif operator == ComparisonOperator.LESS_THAN:
+                if isinstance(current_value, (int, float)) and isinstance(target_value, (int, float)):
+                    if current_value >= target_value:
+                        cost += current_value - target_value + 1
+                else:
+                    cost += 1.0
+            elif operator == ComparisonOperator.GREATER_THAN:
+                if isinstance(current_value, (int, float)) and isinstance(target_value, (int, float)):
+                    if current_value <= target_value:
+                        cost += target_value - current_value + 1
+                else:
+                    cost += 1.0
+            # Add other operators as needed
+            
+        return cost
+    
+    elif isinstance(goal, ExtremeGoal):
+        # ExtremeGoal: Distance from current value to optimization direction
+        cost = 0.0
+        for key, maximize in goal.optimizations.items():
+            if key not in state:
+                cost += float('inf')
+                continue
+            
+            current_value = state[key]
+            if not isinstance(current_value, (int, float)):
+                cost += float('inf')
+                continue
+            
+            # For extreme goals, we use the inverse of the current value as heuristic
+            # This encourages moving toward higher values (for maximize) or lower values (for minimize)
+            if maximize:
+                # For maximization, higher values have lower heuristic cost
+                cost += max(0, 100 - current_value)  # Assume max reasonable value of 100
+            else:
+                # For minimization, lower values have lower heuristic cost
+                cost += current_value
+        
+        return cost
+    
+    # Default case - no heuristic guidance
+    return 0.0
 
 
-def astar_pathfind():
-    pass
+def astar_pathfind(start_state: dict, goal: BaseGoal, concrete_actions: list) -> Optional[list]:
+    """
+    The main A* implementation. Finds the cheapest path from start_state to a state
+    that satisfies the goal using the provided concrete actions.
+    
+    Returns a list of actions to execute, or None if no path exists.
+    """
+    # Convert state to immutable representation for dictionary keys
+    def make_hashable_state(state):
+        return tuple(sorted(state.items()))
+    
+    # Phase 1: Initialization
+    start_h = _calculate_heuristic(start_state, goal)
+    start_node = _SearchNode(start_state, None, None, 0.0, start_h)
+    
+    # Open set (priority queue) - nodes to be evaluated
+    open_set = [start_node]
+    heapq.heapify(open_set)
+    
+    # Closed set - states we've already evaluated
+    closed_set = set()
+    
+    # Track best known g-score for each state
+    g_scores = {make_hashable_state(start_state): 0.0}
+    
+    # Phase 2: Main Search Loop
+    while open_set:
+        # Pop the node with lowest f-score
+        current_node = heapq.heappop(open_set)
+        current_state_key = make_hashable_state(current_node.state)
+        
+        # Check if we've already processed this state with a better path
+        if current_state_key in closed_set:
+            continue
+        
+        # Check if goal is satisfied
+        if goal.is_satisfied(current_node.state):
+            return _reconstruct_path(current_node)
+        
+        # Add current state to closed set
+        closed_set.add(current_state_key)
+        
+        # Get all successor states
+        successors = get_successors(current_node.state, concrete_actions)
+        
+        for action, new_state, action_cost in successors:
+            new_state_key = make_hashable_state(new_state)
+            
+            # Skip if already fully evaluated
+            if new_state_key in closed_set:
+                continue
+            
+            # Calculate tentative g-score
+            tentative_g = current_node.g_score + action_cost
+            
+            # Check if this is a better path to this state
+            if new_state_key not in g_scores or tentative_g < g_scores[new_state_key]:
+                # Update tracking
+                g_scores[new_state_key] = tentative_g
+                
+                # Calculate heuristic for new state
+                h_score = _calculate_heuristic(new_state, goal)
+                
+                # Create new node and add to open set
+                new_node = _SearchNode(new_state, action, current_node, tentative_g, h_score)
+                heapq.heappush(open_set, new_node)
+    
+    # Phase 3: Failure Case - no path exists
+    return None

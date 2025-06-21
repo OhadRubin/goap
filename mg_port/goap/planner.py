@@ -106,13 +106,95 @@ The Python version improves clarity by:
 ---
 
 """
-def _calculate_plan_utility():
-    pass
+from .parameters import generate_action_variants
+from .search import astar_pathfind
 
 
-def _find_plan_for_goal():
-    pass
+def _calculate_plan_utility(plan_cost: float, goal) -> float:
+    """
+    Calculate the utility of a plan for a given goal.
+    
+    Args:
+        plan_cost: Total cost of the plan
+        goal: The goal being evaluated
+        
+    Returns:
+        The utility score (higher is better)
+        
+    Note:
+        Utility is calculated as goal.weight / plan_cost, creating a natural
+        trade-off between goal importance and plan expense. Higher weight goals
+        can justify more expensive plans.
+    """
+    if plan_cost <= 0:
+        return float('inf')  # Free plans have infinite utility
+    return goal.weight / plan_cost
 
 
-def orchestrate_planning():
-    pass
+def _find_plan_for_goal(goal, start_state: dict, concrete_actions: list):
+    """
+    Find a plan to achieve a specific goal using A* search.
+    
+    Args:
+        goal: The goal to achieve
+        start_state: Current world state 
+        concrete_actions: List of all concrete actions available
+        
+    Returns:
+        List of actions representing the plan, or None if no plan exists
+        
+    Note:
+        This helper delegates the actual pathfinding to the search module,
+        keeping the main planning logic clean and allowing for different
+        search algorithms to be substituted.
+    """
+    return astar_pathfind(start_state, goal, concrete_actions)
+
+
+def orchestrate_planning(agent):
+    """
+    The main planning function that finds the best plan for an agent.
+    
+    Args:
+        agent: The agent that needs a plan
+        
+    Returns:
+        List of actions representing the best plan, or None if no valid plans exist
+        
+    Note:
+        This function follows a three-phase process:
+        1. Action Generation: Create all possible concrete actions
+        2. Goal Evaluation: Find plans for each goal and calculate utilities
+        3. Plan Selection: Return the plan with highest utility
+    """
+    # Phase 1: Action Generation
+    # Generate all possible concrete actions from the agent's action templates
+    concrete_actions = []
+    for action_template in agent.actions:
+        action_variants = generate_action_variants(action_template, agent.state)
+        concrete_actions.extend(action_variants)
+    
+    # Phase 2: Goal Evaluation  
+    # Evaluate each goal and find the best plan
+    best_plan = None
+    best_utility = 0.0
+    
+    for goal in agent.goals:
+        # Try to find a plan for this goal
+        plan = _find_plan_for_goal(goal, agent.state, concrete_actions)
+        
+        if plan is not None:
+            # Calculate the total cost of this plan
+            plan_cost = sum(action.cost for action in plan)
+            
+            # Calculate the utility of this plan
+            utility = _calculate_plan_utility(plan_cost, goal)
+            
+            # Track if this is the best plan so far
+            if utility > best_utility:
+                best_utility = utility
+                best_plan = plan
+    
+    # Phase 3: Plan Selection
+    # Return the plan with the highest utility (or None if no plans found)
+    return best_plan

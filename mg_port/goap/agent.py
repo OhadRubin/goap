@@ -157,6 +157,11 @@ The Python version simplifies by:
 - More Pythonic method organization
 """
 from enum import Enum
+from typing import Dict, List, Optional, Any
+from .action import Action, ExecutionStatus
+from .goal import BaseGoal
+from .sensor import Sensor
+from . import planner
 
 
 class StepMode(Enum):
@@ -165,17 +170,98 @@ class StepMode(Enum):
 
 
 class Agent:
-    def __init__(self):
-        pass
+    def __init__(self, name: str, initial_state: Dict[str, Any], actions: List[Action], 
+                 goals: List[BaseGoal], sensors: List[Sensor]):
+        """Initialize the agent with all its components.
+        
+        Args:
+            name: Identifier for the agent
+            initial_state: Dictionary representing the agent's initial world knowledge
+            actions: List of action templates the agent can perform
+            goals: List of goals the agent wants to achieve
+            sensors: List of sensors for perceiving the world
+        """
+        self.name = name
+        self.state = initial_state.copy()  # Agent owns and manages its state
+        self.actions = actions.copy()  # Agent takes ownership of components
+        self.goals = goals.copy()
+        self.sensors = sensors.copy()
+        self.current_plan: Optional[List[Action]] = None  # The active plan being executed
     
-    def step(self):
-        pass
+    def step(self, mode: StepMode = StepMode.DEFAULT) -> None:
+        """The primary public method and main entry point for agent activity.
+        
+        Orchestrates the sense-plan-act cycle:
+        1. Always runs sensors via _run_sensors()
+        2. Checks if a new plan is needed (no plan or plan invalidated)
+        3. If planning needed and mode allows, calls _find_new_plan()
+        4. If plan exists, calls _execute_current_action()
+        
+        Args:
+            mode: Controls how the step method behaves
+        """
+        # Step 1: Always sense first
+        self._run_sensors()
+        
+        # Step 2: Check if we need a new plan
+        needs_new_plan = (self.current_plan is None or len(self.current_plan) == 0)
+        
+        # Step 3: Plan if needed (mode-dependent behavior)
+        if needs_new_plan:
+            if mode == StepMode.DEFAULT:
+                # In DEFAULT mode, always plan when needed
+                self._find_new_plan()
+            elif mode == StepMode.ONE_ACTION:
+                # In ONE_ACTION mode, plan synchronously when needed
+                self._find_new_plan()
+        
+        # Step 4: Execute current action if we have a plan
+        if self.current_plan and len(self.current_plan) > 0:
+            self._execute_current_action()
     
-    def _run_sensors(self):
-        pass
+    def _run_sensors(self) -> None:
+        """Private helper that iterates through all sensors and calls their run() method,
+        passing the agent's state dictionary. This ensures the agent's world knowledge
+        is up-to-date before planning or acting.
+        """
+        for sensor in self.sensors:
+            sensor.run(self.state)
     
-    def _find_new_plan(self):
-        pass
+    def _find_new_plan(self) -> None:
+        """Private helper that calls the planner module's orchestrate_planning() function,
+        passes self as the agent parameter, and updates self.current_plan with the result.
+        This method encapsulates all interaction with the planning system.
+        """
+        self.current_plan = planner.orchestrate_planning(self)
     
-    def _execute_current_action(self):
-        pass
+    def _execute_current_action(self) -> None:
+        """Private helper that manages plan execution:
+        1. Pops the next action from the current plan
+        2. Calls the action's executor function
+        3. Handles the returned ExecutionStatus:
+           - SUCCEEDED: Action complete, already removed from plan
+           - FAILED: Clear the entire plan (needs replanning)
+           - EXECUTING: Keep action in plan for next step
+        """
+        if not self.current_plan or len(self.current_plan) == 0:
+            return
+        
+        # Get the next action (but don't remove it yet)
+        current_action = self.current_plan[0]
+        
+        # Execute the action
+        execution_status = current_action.executor(self)
+        
+        # Handle the execution result
+        if execution_status == ExecutionStatus.SUCCEEDED:
+            # Action completed successfully, remove it from the plan
+            self.current_plan.pop(0)
+        elif execution_status == ExecutionStatus.FAILED:
+            # Action failed, abandon the entire plan (triggers replanning)
+            self.current_plan = None
+        elif execution_status == ExecutionStatus.EXECUTING:
+            # Action is still executing, keep it in the plan for next step
+            pass
+        else:
+            # Unknown status, treat as failure
+            self.current_plan = None
