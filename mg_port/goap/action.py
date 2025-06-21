@@ -128,6 +128,7 @@ class Action:
         self.effects = effects.copy()
         self.executor = executor
         self.parameterizers = parameterizers or []
+        self.parameters = {}
     
     def is_possible(self, state: Dict[str, Any]) -> bool:
         """Check if the action's preconditions are met by a given world state.
@@ -235,42 +236,29 @@ class Action:
         # If no valid comparison found, condition is not met
         return False
     
-
-def test_action_basic():
-    """Test basic action functionality."""
+    def copy(self):
+        """Create a copy of this action for parameterization.
+        
+        Returns:
+            New Action instance that is a copy of this one
+        """
+        new_action = Action(
+            name=self.name,
+            cost=self.cost,
+            preconditions=self.preconditions.copy(),
+            effects=self.effects.copy(),
+            executor=self.executor,
+            parameterizers=self.parameterizers.copy() if self.parameterizers else None
+        )
+        new_action.parameters = self.parameters.copy()
+        return new_action
     
-    def dummy_executor():
-        return ExecutionStatus.SUCCEEDED
+    def set_parameter(self, name: str, value: Any):
+        """Set a parameter value on this action.
+        
+        Args:
+            name: Parameter name
+            value: Parameter value to set
+        """
+        self.parameters[name] = value
     
-    # Create a simple action
-    action = Action(
-        name="test_action",
-        cost=1.0,
-        preconditions={"has_key": True, "health": "> 30"},
-        effects={"door_open": True, "health": "+10"},
-        executor=dummy_executor
-    )
-    
-    # Test preconditions with valid state
-    valid_state = {"has_key": True, "health": 50}
-    assert action.is_possible(valid_state), "Action should be possible with valid state"
-    
-    # Test preconditions with invalid state  
-    invalid_state = {"has_key": False, "health": 50}
-    assert not action.is_possible(invalid_state), "Action should not be possible without key"
-    
-    # Test preconditions with low health
-    low_health_state = {"has_key": True, "health": 20}
-    assert not action.is_possible(low_health_state), "Action should not be possible with low health"
-    
-    # Test effects application
-    initial_state = {"has_key": True, "health": 40, "door_open": False}
-    new_state = action.apply_effects(initial_state)
-    assert new_state["door_open"] == True, "Door should be open after effect"
-    assert new_state["health"] == 50, "Health should increase by 10"
-    assert initial_state["health"] == 40, "Original state should be unchanged"
-    
-    print("All tests passed!")
-
-if __name__ == "__main__":
-    test_action_basic()

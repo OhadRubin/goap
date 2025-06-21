@@ -180,6 +180,10 @@ def orchestrate_planning(agent):
     best_utility = 0.0
     
     for goal in agent.goals:
+        # Check if goal is already satisfied
+        if goal.is_satisfied(agent.state):
+            continue
+            
         # Try to find a plan for this goal
         plan = _find_plan_for_goal(goal, agent.state, concrete_actions)
         

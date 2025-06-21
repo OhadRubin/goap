@@ -296,17 +296,10 @@ def generate_action_variants(action_template, state: Dict[str, Any]) -> List:
         # This assumes action_template has a copy() method or similar
         if hasattr(action_template, 'copy'):
             variant = action_template.copy()
+        
         else:
-            # Fallback: try to create a new instance
-            # This may need adjustment based on actual Action class implementation
-            variant = type(action_template)(
-                name=getattr(action_template, 'name', 'action'),
-                cost=getattr(action_template, 'cost', 1.0),
-                preconditions=getattr(action_template, 'preconditions', {}),
-                effects=getattr(action_template, 'effects', {}),
-                executor=getattr(action_template, 'executor', lambda: None),
-                parameterizers=getattr(action_template, 'parameterizers', {})
-            )
+            assert False, "Action template must have a copy() method"
+
         
         # Set parameters on the variant
         for param_name, param_value in zip(parameter_names, combination):
@@ -317,8 +310,8 @@ def generate_action_variants(action_template, state: Dict[str, Any]) -> List:
                     variant.parameters = {}
                 variant.parameters[param_name] = param_value
             else:
-                # Fallback: set as attribute
-                setattr(variant, param_name, param_value)
+                assert False, "Action template must have a set_parameter() method"
+
         
         variants.append(variant)
     

@@ -161,7 +161,6 @@ from typing import Dict, List, Optional, Any
 from .action import Action, ExecutionStatus
 from .goal import BaseGoal
 from .sensor import Sensor
-from . import planner
 
 
 class StepMode(Enum):
@@ -232,6 +231,12 @@ class Agent:
         passes self as the agent parameter, and updates self.current_plan with the result.
         This method encapsulates all interaction with the planning system.
         """
+        # Use sys.modules to get planner to allow for mocking in tests
+        import sys
+        planner = sys.modules.get('goap.planner')
+        if planner is None:
+            from . import planner as planner_module
+            planner = planner_module
         self.current_plan = planner.orchestrate_planning(self)
     
     def _execute_current_action(self) -> None:
